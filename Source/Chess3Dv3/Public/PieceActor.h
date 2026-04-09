@@ -22,6 +22,9 @@ public:
 	bool m_hasMoved = false;
 
 	APieceActor();
+
+	virtual void Tick(float DeltaTime) override;
+
 	UFUNCTION()
 		void Init(ABoardActor* board, int x, int y, TEnumAsByte<PieceColor> color, class UMaterial* material);
 	UFUNCTION()
@@ -39,9 +42,15 @@ private:
 
 	void HighlightMaterial();
 	void SetMaterial(class UMaterial* material, bool saveAsDefault);
-	
+
 	bool isValidMove(ACaseActor* targetCase);
 
 	class UMaterial* m_DefaultMaterial;
 	bool m_isHighlighted = false;
+
+	// Move animation
+	FVector m_MoveStartLocation;
+	FVector m_MoveTargetLocation;
+	float m_MoveElapsed = 0.f;
+	bool m_bIsMoving = false;
 };

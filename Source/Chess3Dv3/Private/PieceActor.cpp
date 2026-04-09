@@ -5,9 +5,33 @@
 #include "BoardActor.h"
 #include "CaseActor.h"
 
+static constexpr float MoveDuration = 0.7f;
+
 APieceActor::APieceActor()
 {
+	PrimaryActorTick.bCanEverTick = true;
 	OnClicked.AddUniqueDynamic(this, &APieceActor::ClickedLog);
+}
+
+void APieceActor::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (!m_bIsMoving)
+		return;
+
+	m_MoveElapsed += DeltaTime;
+	const float Alpha = FMath::Clamp(m_MoveElapsed / MoveDuration, 0.f, 1.f);
+
+	// Smoothstep: 3t² - 2t³
+	const float Smooth = Alpha * Alpha * (3.f - 2.f * Alpha);
+	SetActorLocation(FMath::Lerp(m_MoveStartLocation, m_MoveTargetLocation, Smooth));
+
+	if (Alpha >= 1.f)
+	{
+		m_bIsMoving = false;
+		m_Board->EndTurn();
+	}
 }
 
 void APieceActor::Init(ABoardActor* board, int x, int y, TEnumAsByte<PieceColor> color, class UMaterial* material)
@@ -85,6 +109,9 @@ bool APieceActor::isValidMove(ACaseActor* targetCase)
 
 void APieceActor::Move(ACaseActor* targetCase)
 {
+	if (m_bIsMoving)
+		return;
+
 	if (isValidMove(targetCase))
 	{
 		HighlightMaterial();
@@ -97,10 +124,12 @@ void APieceActor::Move(ACaseActor* targetCase)
 		targetCase->m_Piece = this;
 		m_X = targetCase->m_X;
 		m_Y = targetCase->m_Y;
-
-		SetActorLocation(targetCase->GetActorLocation());
-
 		m_hasMoved = true;
-		m_Board->EndTurn();
+
+		// Start animated movement — EndTurn() is called from Tick when complete
+		m_MoveStartLocation = GetActorLocation();
+		m_MoveTargetLocation = targetCase->GetActorLocation();
+		m_MoveElapsed = 0.f;
+		m_bIsMoving = true;
 	}
 }
