@@ -133,3 +133,25 @@ void APieceActor::Move(ACaseActor* targetCase)
 		m_bIsMoving = true;
 	}
 }
+
+void APieceActor::MoveAI(ACaseActor* targetCase)
+{
+	if (m_bIsMoving) return;
+
+	if (isValidMove(targetCase))
+	{
+		// 하이라이트 없이 이동 (AI 전용)
+		m_Board->GetCase(m_X, m_Y)->m_Piece = nullptr;
+		if (targetCase->m_Piece != nullptr)
+			targetCase->m_Piece->Destroy();
+		targetCase->m_Piece = this;
+		m_X = targetCase->m_X;
+		m_Y = targetCase->m_Y;
+		m_hasMoved = true;
+
+		m_MoveStartLocation = GetActorLocation();
+		m_MoveTargetLocation = targetCase->GetActorLocation();
+		m_MoveElapsed = 0.f;
+		m_bIsMoving = true;
+	}
+}

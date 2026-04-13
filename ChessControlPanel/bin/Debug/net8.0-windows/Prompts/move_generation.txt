@@ -1,0 +1,20 @@
+=== POSITION ===
+FEN: {fen}
+Phase: {game_phase} | Material: {material_balance}{check_warning}
+Move history: {move_history}
+
+=== LEGAL MOVES (choose EXACTLY one from this list) ===
+{legal_moves}
+
+=== INSTRUCTIONS ===
+Step 1 — Identify the top 3 candidate moves from the legal moves list.
+Step 2 — Evaluate each candidate: tactics first (checks, captures, threats), then strategy.
+Step 3 — Select the single best move.
+
+Respond ONLY in this JSON format:
+{{"candidates": ["move1", "move2", "move3"], "evaluation": "one sentence comparing candidates", "move": "EXACT_MOVE_FROM_LIST", "comment": "한국어로 선택 이유 (1~2문장)"}}
+
+CRITICAL RULES:
+- "move" MUST be one of the legal moves listed above, copied exactly (including +, #, =Q etc.)
+- Do NOT invent moves outside the list
+- Prefer forcing moves (check, capture, threat) over quiet moves when they are sound

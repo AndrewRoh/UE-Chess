@@ -79,6 +79,15 @@ void ACaseActor::HighlightMaterial()
 	m_isHighlighted = !m_isHighlighted;
 }
 
+void ACaseActor::ResetHighlight()
+{
+	if (m_isHighlighted)
+	{
+		SetMaterial(m_DefaultMaterial, false);
+		m_isHighlighted = false;
+	}
+}
+
 void ACaseActor::ClickedLog(AActor* Target, FKey ButtonPressed)
 {
 	// Move selected piece if case is valid for a move

@@ -30,6 +30,9 @@ public:
 	UFUNCTION()
 		void Move(ACaseActor* targetCase);
 
+	// AI 전용 — 하이라이트 없이 이동
+	void MoveAI(ACaseActor* targetCase);
+
 
 	UPROPERTY(BlueprintReadWrite)
 		class UMaterial* m_HighlightMaterial;

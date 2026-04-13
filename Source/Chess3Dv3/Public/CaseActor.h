@@ -53,6 +53,7 @@ public:
 	ACaseActor();
 	void Init(ABoardActor* board, int x, int y);
 	void HighlightMaterial();
+	void ResetHighlight();
 	void SetMaterial(class UMaterial* material, bool saveAsDefault);
 private:
 	UFUNCTION()
