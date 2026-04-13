@@ -21,6 +21,18 @@ bool FChessServerThread::Init()
 	return true;
 }
 
+bool FChessServerThread::SendToClient(const FString& JsonLine)
+{
+	FScopeLock Lock(&SendMutex);
+	if (!ConnSocket) return false;
+
+	FString Line = JsonLine + TEXT("\n");
+	FTCHARToUTF8 Conv(*Line);
+	int32 Sent = 0;
+	return ConnSocket->Send(
+		reinterpret_cast<const uint8*>(Conv.Get()), Conv.Length(), Sent);
+}
+
 uint32 FChessServerThread::Run()
 {
 	ISocketSubsystem* SS = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
@@ -50,44 +62,50 @@ uint32 FChessServerThread::Run()
 	Listener->Listen(1);
 	UE_LOG(LogTemp, Log, TEXT("ChessServer: 포트 7777 대기 중..."));
 
-	FSocket*  Conn = nullptr;
-	FString   Accum;
-	uint8     Buf[4097];
+	FString  Accum;
+	uint8    Buf[4097];
 
 	while (!bStop)
 	{
 		// 새 연결 수락
-		if (!Conn)
+		if (!ConnSocket)
 		{
 			bool bPending = false;
 			if (Listener->HasPendingConnection(bPending) && bPending)
 			{
-				Conn = Listener->Accept(TEXT("WPF"));
-				if (Conn)
+				FSocket* Accepted = Listener->Accept(TEXT("WPF"));
+				if (Accepted)
 				{
-					Conn->SetNonBlocking(true);
+					Accepted->SetNonBlocking(true);
+					{
+						FScopeLock Lock(&SendMutex);
+						ConnSocket = Accepted;
+					}
 					UE_LOG(LogTemp, Log, TEXT("ChessServer: WPF 연결됨"));
 				}
 			}
 		}
 
 		// 수신 루프
-		if (Conn)
+		if (ConnSocket)
 		{
 			uint32 PendingSize = 0;
-			while (Conn->HasPendingData(PendingSize) && PendingSize > 0 && !bStop)
+			while (ConnSocket->HasPendingData(PendingSize) && PendingSize > 0 && !bStop)
 			{
 				int32 BytesRead = 0;
 				int32 ToRead = FMath::Min((int32)PendingSize, (int32)(sizeof(Buf) - 1));
-				bool bRecvOk = Conn->Recv(Buf, ToRead, BytesRead,
+				bool bRecvOk = ConnSocket->Recv(Buf, ToRead, BytesRead,
 					ESocketReceiveFlags::None);
 
 				if (!bRecvOk || BytesRead <= 0)
 				{
 					// 연결 끊김
-					Conn->Close();
-					SS->DestroySocket(Conn);
-					Conn = nullptr;
+					{
+						FScopeLock Lock(&SendMutex);
+						ConnSocket->Close();
+						SS->DestroySocket(ConnSocket);
+						ConnSocket = nullptr;
+					}
 					Accum.Empty();
 					UE_LOG(LogTemp, Log, TEXT("ChessServer: WPF 연결 종료"));
 					break;
@@ -114,10 +132,14 @@ uint32 FChessServerThread::Run()
 	}
 
 	// 정리
-	if (Conn)
 	{
-		Conn->Close();
-		SS->DestroySocket(Conn);
+		FScopeLock Lock(&SendMutex);
+		if (ConnSocket)
+		{
+			ConnSocket->Close();
+			SS->DestroySocket(ConnSocket);
+			ConnSocket = nullptr;
+		}
 	}
 	Listener->Close();
 	SS->DestroySocket(Listener);
@@ -156,6 +178,12 @@ void UChessCommandSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
+bool UChessCommandSubsystem::SendToWpf(const FString& JsonLine)
+{
+	if (!ServerRunnable) return false;
+	return ServerRunnable->SendToClient(JsonLine);
+}
+
 ABoardActor* UChessCommandSubsystem::FindBoard() const
 {
 	UWorld* World = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
@@ -177,6 +205,33 @@ void UChessCommandSubsystem::ProcessCommand(const FString& JsonLine)
 		return;
 	}
 
+	// type 필드로 메시지 종류 판별 (cmd 필드는 command 타입에만)
+	FString Type;
+	JsonObj->TryGetStringField(TEXT("type"), Type);
+
+	// ── AI 수 응답 (WPF → UE5) ─────────────────────────────────
+	if (Type == TEXT("ai_move_response"))
+	{
+		bool    bOk      = false;
+		FString MoveUci;
+		FString CommentKo;
+		FString ErrorMsg;
+
+		JsonObj->TryGetBoolField(TEXT("ok"),        bOk);
+		JsonObj->TryGetStringField(TEXT("moveUci"), MoveUci);
+		JsonObj->TryGetStringField(TEXT("commentKo"), CommentKo);
+		JsonObj->TryGetStringField(TEXT("error"),   ErrorMsg);
+
+		AsyncTask(ENamedThreads::GameThread, [this, bOk, MoveUci, CommentKo, ErrorMsg]()
+		{
+			ABoardActor* Board = FindBoard();
+			if (!Board) return;
+			Board->OnAiMoveResponseTcp(bOk, MoveUci, CommentKo, ErrorMsg);
+		});
+		return;
+	}
+
+	// ── 일반 커맨드 (WPF → UE5) ───────────────────────────────
 	FString Cmd;
 	if (!JsonObj->TryGetStringField(TEXT("cmd"), Cmd))
 	{

@@ -32,14 +32,15 @@ public sealed class LlmClient : IDisposable
     {
         var payload = new
         {
-            model  = _model,
-            system = systemPrompt,
-            prompt = userPrompt,
-            stream = false,
+            model      = _model,
+            system     = systemPrompt,
+            prompt     = userPrompt,
+            stream     = false,
+            keep_alive = "30m",   // 모델을 GPU 메모리에 30분 유지 → 재로딩 지연 제거
             options = new
             {
                 temperature,
-                num_predict    = 500,
+                num_predict    = 150,  // 체스 수 JSON은 최대 100토큰이면 충분 (500→150)
                 top_p          = 0.9,
                 repeat_penalty = 1.1,
                 num_gpu        = 99,

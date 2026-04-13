@@ -10,7 +10,7 @@ public class Chess3Dv3 : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core", "CoreUObject", "Engine", "InputCore",
-			"HTTP", "Sockets", "Networking", "Json", "JsonUtilities"
+			"Sockets", "Networking", "Json", "JsonUtilities"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

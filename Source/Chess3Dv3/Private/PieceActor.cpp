@@ -116,6 +116,13 @@ void APieceActor::Move(ACaseActor* targetCase)
 	{
 		HighlightMaterial();
 
+		// 인간 플레이어 수를 이동 히스토리에 기록 (AI 컨텍스트용)
+		// UCI: file = 'a'+y, rank = 8-x
+		FString Uci = FString::Printf(TEXT("%c%d%c%d"),
+			TEXT('a') + m_Y,             8 - m_X,
+			TEXT('a') + targetCase->m_Y, 8 - targetCase->m_X);
+		m_Board->m_MoveHistory.Add(Uci);
+
 		m_Board->GetCase(m_X, m_Y)->m_Piece = nullptr;
 		// TODO: make something cleaner than just destroying
 		// "Destroy" opponent piece if any

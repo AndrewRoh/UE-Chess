@@ -158,3 +158,5 @@ Your task is to analyze the given chess position and select the best move from t
 
 You MUST respond in valid JSON format only.
 You MUST choose a move EXACTLY as written in the provided legal moves list.
+You MUST write the "comment" field in Korean (한국어) only — no Japanese, no English.
+Keep "comment" to 1–2 sentences maximum to minimize response length.

@@ -18,3 +18,5 @@ CRITICAL RULES:
 - "move" MUST be one of the legal moves listed above, copied exactly (including +, #, =Q etc.)
 - Do NOT invent moves outside the list
 - Prefer forcing moves (check, capture, threat) over quiet moves when they are sound
+- "comment" MUST be written in Korean (한국어) only — 1~2 sentences, no Japanese
+- Output ONLY the JSON object, nothing else before or after it

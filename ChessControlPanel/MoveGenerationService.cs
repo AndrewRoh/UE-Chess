@@ -54,12 +54,17 @@ public sealed class MoveGenerationService
             .Replace("{{", "{")
             .Replace("}}", "}");
 
+        // 3회 재시도 전체에 대한 단일 타임아웃 (100초).
+        // 시도별로 90초를 따로 두면 최대 270초가 되어 UE5 HTTP 타임아웃(120초)을 초과할 수 있음.
+        using var globalCts = new CancellationTokenSource(TimeSpan.FromSeconds(100));
+
         for (int attempt = 1; attempt <= 3; attempt++)
         {
+            if (globalCts.Token.IsCancellationRequested) break;
+
             try
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(90));
-                string raw = await _llm.GenerateAsync(_systemPrompt, userPrompt, temp, cts.Token);
+                string raw = await _llm.GenerateAsync(_systemPrompt, userPrompt, temp, globalCts.Token);
 
                 using var doc  = JsonDocument.Parse(raw);
                 string    move = doc.RootElement.GetProperty("move").GetString() ?? "";
@@ -81,11 +86,11 @@ public sealed class MoveGenerationService
             }
             catch (OperationCanceledException)
             {
-                break; // 타임아웃
+                break; // 전체 타임아웃(100초) 초과
             }
             catch (Exception)
             {
-                if (attempt == 3) break;
+                if (attempt == 3 || globalCts.Token.IsCancellationRequested) break;
             }
         }
 

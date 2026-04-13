@@ -9,10 +9,10 @@
 #include "BishopPieceActor.h"
 #include "QueenPieceActor.h"
 #include "KingPieceActor.h"
+#include "ChessCommandServer.h"
 
-#include "HttpModule.h"
 #include "Json.h"
-#include "JsonUtilities.h"
+#include "Kismet/GameplayStatics.h"
 
 ABoardActor::ABoardActor()
 {
@@ -72,6 +72,8 @@ void ABoardActor::RestartGame()
 	// 선택 상태 초기화
 	m_selectedPiece = nullptr;
 	m_bAiThinking = false;
+	m_AiRetryCount = 0;
+	GetWorldTimerManager().ClearTimer(m_AiRetryTimer);
 	m_MoveHistory.Empty();
 
 	// 모든 말 제거 + 케이스 하이라이트 초기화
@@ -172,7 +174,6 @@ FString ABoardActor::GenerateFEN() const
 
 	// 3. 캐슬링 권리
 	FString Castling;
-	// 백 킹 위치: x=7, y=3 (킹 초기 위치)
 	ACaseActor* WKCase = cases[7 * 8 + 4];
 	if (IsValid(WKCase) && IsValid(WKCase->m_Piece)
 		&& Cast<AKingPieceActor>(WKCase->m_Piece)
@@ -188,7 +189,6 @@ FString ABoardActor::GenerateFEN() const
 			&& Cast<ARookPieceActor>(WQR->m_Piece) && !WQR->m_Piece->m_hasMoved)
 			Castling += TEXT("Q");
 	}
-	// 흑 킹 위치: x=0, y=3
 	ACaseActor* BKCase = cases[0 * 8 + 4];
 	if (IsValid(BKCase) && IsValid(BKCase->m_Piece)
 		&& Cast<AKingPieceActor>(BKCase->m_Piece)
@@ -213,7 +213,6 @@ FString ABoardActor::GenerateFEN() const
 }
 
 // ── UCI 합법 수 목록 ─────────────────────────────────────────
-// UCI 형식: "a1b2" = (7,0)→(6,1)   rank = 8-x, file = 'a'+y
 
 TArray<FString> ABoardActor::GetLegalMovesUCI() const
 {
@@ -246,7 +245,6 @@ bool ABoardActor::ExecuteMoveUCI(const FString& Uci)
 		return false;
 	}
 
-	// "e2e4" → fromY='e'-'a'=4, fromRank='2'-'0'=2 → fromX=8-2=6
 	int fromY    = Uci[0] - TEXT('a');
 	int fromRank = Uci[1] - TEXT('0');
 	int fromX    = 8 - fromRank;
@@ -268,7 +266,6 @@ bool ABoardActor::ExecuteMoveUCI(const FString& Uci)
 		return false;
 	}
 
-	// 합법 수 목록에서 검증
 	TArray<FString> Legal = GetLegalMovesUCI();
 	if (!Legal.Contains(Uci))
 	{
@@ -277,31 +274,36 @@ bool ABoardActor::ExecuteMoveUCI(const FString& Uci)
 	}
 
 	ACaseActor* ToCase = GetCase(toX, toY);
-	// AI 전용 경로 — 하이라이트 없이 이동
 	FromCase->m_Piece->MoveAI(ToCase);
 	m_MoveHistory.Add(Uci);
 	return true;
 }
 
-// ── chess-api HTTP 호출 ──────────────────────────────────────
+// ── TCP 경유 AI 수 요청 ──────────────────────────────────────
+// HTTP 대신 기존 포트 7777 TCP 연결을 양방향으로 사용.
+// UE5 → WPF : {"v":1,"type":"ai_move_request","fen":"...","legal_moves":[...],...}
+// WPF → UE5 : {"v":1,"type":"ai_move_response","ok":true,"moveUci":"e2e4","commentKo":"..."}
 
 void ABoardActor::RequestAiMove()
 {
 	m_bAiThinking = true;
+	GetWorldTimerManager().ClearTimer(m_AiRetryTimer);
 
 	FString Fen = GenerateFEN();
 	TArray<FString> LegalMoves = GetLegalMovesUCI();
 
 	if (LegalMoves.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Chess AI: No legal moves — game over?"));
+		UE_LOG(LogTemp, Warning, TEXT("Chess AI: 합법 수 없음 — 게임 종료?"));
 		m_bAiThinking = false;
 		return;
 	}
 
 	// 요청 JSON 빌드
 	TSharedPtr<FJsonObject> ReqJson = MakeShared<FJsonObject>();
-	ReqJson->SetStringField(TEXT("fen"), Fen);
+	ReqJson->SetNumberField(TEXT("v"),    1);
+	ReqJson->SetStringField(TEXT("type"), TEXT("ai_move_request"));
+	ReqJson->SetStringField(TEXT("fen"),  Fen);
 
 	TArray<TSharedPtr<FJsonValue>> MovesArr;
 	for (const FString& M : LegalMoves)
@@ -313,66 +315,72 @@ void ABoardActor::RequestAiMove()
 		HistArr.Add(MakeShared<FJsonValueString>(H));
 	ReqJson->SetArrayField(TEXT("move_history"), HistArr);
 
-	ReqJson->SetNumberField(TEXT("ai_level"), m_AiLevel);
+	ReqJson->SetNumberField(TEXT("ai_level"),      m_AiLevel);
 	ReqJson->SetNumberField(TEXT("time_limit_ms"), 3000.0);
 
+	// WPF가 ReadLineAsync()로 수신하므로 반드시 한 줄(개행 없는) 압축 JSON이어야 함
 	FString Body;
-	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Body);
+	TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&Body);
 	FJsonSerializer::Serialize(ReqJson.ToSharedRef(), Writer);
 
-	TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request =
-		FHttpModule::Get().CreateRequest();
-	Request->SetURL(TEXT("http://127.0.0.1:18080/api/ue/ai_move"));
-	Request->SetVerb(TEXT("POST"));
-	Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
-	Request->SetContentAsString(Body);
-	Request->SetTimeout(5.0f);
-	Request->OnProcessRequestComplete().BindUObject(
-		this, &ABoardActor::OnAiMoveResponse);
-	Request->ProcessRequest();
+	// 기존 TCP 연결(포트 7777)을 통해 WPF로 전송
+	UGameInstance* GI = GetGameInstance();
+	UChessCommandSubsystem* Sub = GI
+		? GI->GetSubsystem<UChessCommandSubsystem>() : nullptr;
 
-	UE_LOG(LogTemp, Log, TEXT("Chess AI: Requesting move — FEN: %s"), *Fen);
+	if (!Sub || !Sub->SendToWpf(Body))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Chess AI: TCP 전송 실패 (WPF 미연결?) — retry %d/%d"),
+			m_AiRetryCount + 1, MaxAiRetries);
+		m_bAiThinking = false;
+		if (m_AiRetryCount < MaxAiRetries)
+		{
+			++m_AiRetryCount;
+			GetWorldTimerManager().SetTimer(
+				m_AiRetryTimer, this, &ABoardActor::RequestAiMove, 2.0f, false);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("Chess AI: 최대 재시도 초과 — AI 턴 스킵"));
+			m_AiRetryCount = 0;
+		}
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("Chess AI: TCP 요청 전송 — FEN: %s"), *Fen);
 }
 
-void ABoardActor::OnAiMoveResponse(FHttpRequestPtr /*Request*/,
-                                    FHttpResponsePtr Response,
-                                    bool bWasSuccessful)
+// ── TCP 응답 수신 (ChessCommandServer가 게임 스레드에서 호출) ──
+
+void ABoardActor::OnAiMoveResponseTcp(bool bOk, const FString& MoveUci,
+                                       const FString& CommentKo,
+                                       const FString& ErrorMsg)
 {
-	m_bAiThinking = false;
+	m_bAiThinking  = false;
+	m_AiRetryCount = 0;
+	GetWorldTimerManager().ClearTimer(m_AiRetryTimer);
 
-	if (!bWasSuccessful || !Response.IsValid()
-		|| Response->GetResponseCode() != 200)
-	{
-		UE_LOG(LogTemp, Error, TEXT("Chess AI: HTTP failed (code=%d)"),
-			Response.IsValid() ? Response->GetResponseCode() : -1);
-		return;
-	}
-
-	TSharedPtr<FJsonObject> JsonObj;
-	TSharedRef<TJsonReader<>> Reader =
-		TJsonReaderFactory<>::Create(Response->GetContentAsString());
-	if (!FJsonSerializer::Deserialize(Reader, JsonObj) || !JsonObj.IsValid())
-	{
-		UE_LOG(LogTemp, Error, TEXT("Chess AI: JSON parse error"));
-		return;
-	}
-
-	bool bOk = JsonObj->GetBoolField(TEXT("ok"));
 	if (!bOk)
 	{
-		FString Err = JsonObj->GetStringField(TEXT("error"));
-		UE_LOG(LogTemp, Error, TEXT("Chess AI: API error — %s"), *Err);
+		UE_LOG(LogTemp, Error, TEXT("Chess AI: 응답 오류 — %s"), *ErrorMsg);
 		return;
 	}
 
-	FString MoveUci = JsonObj->GetStringField(TEXT("moveUci"));
-	FString Comment = JsonObj->GetStringField(TEXT("commentKo"));
-	UE_LOG(LogTemp, Log, TEXT("Chess AI: Move=%s  Comment=%s"), *MoveUci, *Comment);
+	UE_LOG(LogTemp, Log, TEXT("Chess AI: Move=%s  Comment=%s"), *MoveUci, *CommentKo);
 
 	if (!ExecuteMoveUCI(MoveUci))
 	{
 		UE_LOG(LogTemp, Error,
-			TEXT("Chess AI: Returned invalid move '%s' — skipping"), *MoveUci);
+			TEXT("Chess AI: 잘못된 수 '%s' — 재시도"), *MoveUci);
+		// 잘못된 수: 재시도
+		if (m_AiRetryCount < MaxAiRetries)
+		{
+			++m_AiRetryCount;
+			m_bAiThinking = true; // 재시도 동안 다른 입력 차단
+			GetWorldTimerManager().SetTimer(
+				m_AiRetryTimer, this, &ABoardActor::RequestAiMove, 0.5f, false);
+		}
 	}
 }
 

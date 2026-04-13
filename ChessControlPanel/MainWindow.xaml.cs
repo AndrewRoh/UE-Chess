@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.IO;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
@@ -14,9 +15,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private const int    UePort = 7777;
 
     // ── 인프라 ───────────────────────────────────────────────────
-    private readonly LlmClient            _llm;
+    private readonly LlmClient             _llm;
     private readonly MoveGenerationService _moveService;
-    private readonly LocalHttpServer      _httpServer;
 
     // ── UE 연결 ──────────────────────────────────────────────────
     private TcpClient?     _client;
@@ -72,9 +72,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         DataContext = this;
 
         _llm         = new LlmClient();
-        _moveService  = new MoveGenerationService(_llm);
-        _httpServer  = new LocalHttpServer(_moveService);
-        _httpServer.Start();
+        _moveService = new MoveGenerationService(_llm);
 
         StartReconnectLoop();
         StartOllamaCheckLoop();
@@ -117,8 +115,92 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             _client = c;
             _stream = c.GetStream();
             Dispatcher.Invoke(() => { IsConnected = true; ErrorText = string.Empty; });
+
+            // 연결 성공 시 수신 루프 시작 (UE5 → WPF 메시지 처리)
+            _ = Task.Run(() => ReceiveLoopAsync(_stream));
         }
         catch { /* 다음 루프에서 재시도 */ }
+    }
+
+    // ── UE5 → WPF 수신 루프 ─────────────────────────────────────
+    private async Task ReceiveLoopAsync(NetworkStream stream)
+    {
+        try
+        {
+            using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+            while (true)
+            {
+                string? line = await reader.ReadLineAsync();
+                if (line == null) break; // 연결 종료
+
+                if (!string.IsNullOrWhiteSpace(line))
+                {
+                    // LLM 처리가 오래 걸려도 수신 루프가 블로킹되지 않도록 별도 Task로 실행
+                    string captured = line;
+                    _ = Task.Run(() => HandleUeMessageAsync(captured));
+                }
+            }
+        }
+        catch { /* 연결 끊김 — StartReconnectLoop가 재연결 처리 */ }
+    }
+
+    private async Task HandleUeMessageAsync(string line)
+    {
+        try
+        {
+            using var doc  = JsonDocument.Parse(line);
+            string    type = doc.RootElement.TryGetProperty("type", out var tp)
+                             ? (tp.GetString() ?? "") : "";
+
+            if (type != "ai_move_request") return;
+
+            // UE5가 TCP로 보낸 AI 수 요청 처리
+            string[] legalMoves  = GetStrArray(doc.RootElement, "legal_moves");
+            string[] moveHistory = GetStrArray(doc.RootElement, "move_history");
+
+            if (legalMoves.Length == 0) return;
+
+            var req = new UEAiMoveRequest
+            {
+                Fen         = GetStr(doc.RootElement, "fen"),
+                LegalMoves  = legalMoves,
+                MoveHistory = moveHistory,
+                AiLevel     = doc.RootElement.TryGetProperty("ai_level", out var al)
+                              ? al.GetInt32() : 2,
+                TimeLimitMs = doc.RootElement.TryGetProperty("time_limit_ms", out var tl)
+                              ? tl.GetInt32() : 3000,
+            };
+
+            AiMoveResponse result = await _moveService.SelectMoveAsync(req);
+
+            // 응답을 동일한 TCP 연결로 전송 (sendLock으로 직렬화됨)
+            await SendCommandAsync(new
+            {
+                v         = 1,
+                type      = "ai_move_response",
+                ok        = result.Ok,
+                moveUci   = result.MoveUci,
+                commentKo = result.CommentKo,
+                error     = result.Error ?? "",
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.WriteLine($"[HandleUeMessage] 오류: {ex.Message}");
+        }
+    }
+
+    private static string GetStr(JsonElement el, string key) =>
+        el.TryGetProperty(key, out var v) ? v.GetString() ?? "" : "";
+
+    private static string[] GetStrArray(JsonElement el, string key)
+    {
+        if (!el.TryGetProperty(key, out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return [];
+        return arr.EnumerateArray()
+                  .Select(x => x.GetString() ?? "")
+                  .Where(s => s.Length > 0)
+                  .ToArray();
     }
 
     // ── Ollama 상태 확인 루프 ────────────────────────────────────
@@ -174,26 +256,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         _ = SendCommandAsync(new { v = 1, type = "command", cmd = "restart", requestId = NewId() });
     }
 
-    private void OnStartWhiteHotseat(object sender, RoutedEventArgs e)
-    {
-        _ = SendCommandAsync(new
-        {
-            v = 1, type = "command", cmd = "new_game",
-            options = new { playerColor = "WHITE", mode = "HOTSEAT" },
-            requestId = NewId()
-        });
-    }
-
-    private void OnStartBlackHotseat(object sender, RoutedEventArgs e)
-    {
-        _ = SendCommandAsync(new
-        {
-            v = 1, type = "command", cmd = "new_game",
-            options = new { playerColor = "BLACK", mode = "HOTSEAT" },
-            requestId = NewId()
-        });
-    }
-
     private void OnVsAiWhite(object sender, RoutedEventArgs e)
     {
         if (!_isOllamaAlive)
@@ -239,7 +301,6 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     protected override void OnClosed(EventArgs e)
     {
-        _httpServer.Stop();
         _stream?.Dispose();
         _client?.Dispose();
         _llm.Dispose();

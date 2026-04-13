@@ -4,8 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "Interfaces/IHttpRequest.h"
-#include "Interfaces/IHttpResponse.h"
 #include "BoardActor.generated.h"
 
 class ACaseActor;
@@ -69,6 +67,10 @@ public:
 	bool ExecuteMoveUCI(const FString& Uci);
 	void TriggerAiTurnIfNeeded();
 
+	/** TCP 경유로 WPF에서 도착한 AI 수 응답 처리 (게임 스레드에서 호출) */
+	void OnAiMoveResponseTcp(bool bOk, const FString& MoveUci,
+	                         const FString& CommentKo, const FString& ErrorMsg);
+
 	// ── 상태 JSON (WPF 피드백용) ───────────────────────────────
 	FString GetStatusJson() const;
 
@@ -77,5 +79,9 @@ protected:
 
 private:
 	void RequestAiMove();
-	void OnAiMoveResponse(FHttpRequestPtr Request, FHttpResponsePtr Response, bool bWasSuccessful);
+
+	// AI 재시도용 타이머 (TCP 전송 실패 시)
+	FTimerHandle m_AiRetryTimer;
+	int          m_AiRetryCount = 0;
+	static constexpr int MaxAiRetries = 3;
 };
