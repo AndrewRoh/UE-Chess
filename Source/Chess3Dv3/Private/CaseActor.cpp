@@ -39,7 +39,7 @@ void ACaseActor::Init(ABoardActor* board, int x, int y)
 			pieceClass = m_bpBishop;
 		else
 		{
-			if ((x == 0 || x == 7) && y == 4)
+			if ((x == 0 || x == 7) && y == 3)
 				pieceClass = m_bpQueen;
 			else
 				pieceClass = m_bpKing;
