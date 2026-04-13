@@ -6,10 +6,10 @@ namespace ChessControlPanel;
 public class UEAiMoveRequest
 {
     [JsonPropertyName("fen")]          public string   Fen          { get; set; } = "";
-    [JsonPropertyName("legalMoves")]   public string[] LegalMoves   { get; set; } = [];
-    [JsonPropertyName("moveHistory")]  public string[] MoveHistory  { get; set; } = [];
-    [JsonPropertyName("aiLevel")]      public int      AiLevel      { get; set; } = 2;
-    [JsonPropertyName("timeLimitMs")]  public int      TimeLimitMs  { get; set; } = 1500;
+    [JsonPropertyName("legal_moves")]   public string[] LegalMoves  { get; set; } = [];
+    [JsonPropertyName("move_history")]  public string[] MoveHistory { get; set; } = [];
+    [JsonPropertyName("ai_level")]      public int      AiLevel     { get; set; } = 2;
+    [JsonPropertyName("time_limit_ms")] public int      TimeLimitMs { get; set; } = 1500;
 }
 
 /// <summary>ChessControlPanel → UE5 응답</summary>
