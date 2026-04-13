@@ -173,7 +173,7 @@ FString ABoardActor::GenerateFEN() const
 	// 3. 캐슬링 권리
 	FString Castling;
 	// 백 킹 위치: x=7, y=3 (킹 초기 위치)
-	ACaseActor* WKCase = cases[7 * 8 + 3];
+	ACaseActor* WKCase = cases[7 * 8 + 4];
 	if (IsValid(WKCase) && IsValid(WKCase->m_Piece)
 		&& Cast<AKingPieceActor>(WKCase->m_Piece)
 		&& !WKCase->m_Piece->m_hasMoved)
@@ -189,7 +189,7 @@ FString ABoardActor::GenerateFEN() const
 			Castling += TEXT("Q");
 	}
 	// 흑 킹 위치: x=0, y=3
-	ACaseActor* BKCase = cases[0 * 8 + 3];
+	ACaseActor* BKCase = cases[0 * 8 + 4];
 	if (IsValid(BKCase) && IsValid(BKCase->m_Piece)
 		&& Cast<AKingPieceActor>(BKCase->m_Piece)
 		&& !BKCase->m_Piece->m_hasMoved)
