@@ -14,9 +14,12 @@ public sealed class LlmClient : IDisposable
     private readonly string     _ollamaHost;
     private readonly string     _model;
 
+    public string OllamaHost => _ollamaHost;
+    public string Model      => _model;
+
     public LlmClient(
-        string ollamaHost = "http://127.0.0.1:11434",
-        string model      = "gemma4:e4b")
+        string ollamaHost = "http://172.20.64.76:11434",
+        string model      = "gemma4:31b")
     {
         _ollamaHost = ollamaHost;
         _model      = model;

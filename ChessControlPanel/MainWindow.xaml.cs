@@ -52,6 +52,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public string OllamaStatusText =>
         _isOllamaAlive ? "● Ollama 준비됨 (AI 대전 가능)" : "● Ollama 꺼짐 (AI 대전 불가)";
 
+    public string OllamaHostText  => _llm.OllamaHost;
+    public string OllamaModelText => _llm.Model;
+
     public string ErrorText
     {
         get => _errorText;
