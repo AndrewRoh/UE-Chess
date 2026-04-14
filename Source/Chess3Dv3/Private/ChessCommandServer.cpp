@@ -272,8 +272,11 @@ void UChessCommandSubsystem::ProcessCommand(const FString& JsonLine)
 					AiLevel = (int)AiLevelD;
 			}
 
-			TEnumAsByte<PieceColor>      Color = (ColorStr == TEXT("BLACK")) ? BLACK : WHITE;
-			TEnumAsByte<EChessGameMode>  Mode  = (ModeStr  == TEXT("VS_AI")) ? VS_AI : HOTSEAT;
+			TEnumAsByte<PieceColor>     Color = (ColorStr == TEXT("BLACK")) ? BLACK : WHITE;
+			TEnumAsByte<EChessGameMode> Mode;
+			if      (ModeStr == TEXT("VS_AI"))    Mode = VS_AI;
+			else if (ModeStr == TEXT("AI_VS_AI")) Mode = AI_VS_AI;
+			else                                  Mode = HOTSEAT;
 
 			UE_LOG(LogTemp, Log,
 				TEXT("ChessServer: [new_game] mode=%s color=%s aiLevel=%d"),

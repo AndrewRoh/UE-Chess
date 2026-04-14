@@ -20,11 +20,11 @@ TArray<ACaseActor*> AKingPieceActor::GetAccessibleCases()
 			{
 				ACaseActor* targetCase = m_Board->GetCase(x, y);
 				// Avoid case with a piece
-				if (targetCase->m_Piece == nullptr || targetCase->m_Piece->m_Color != m_Color)
+				if (targetCase && (targetCase->m_Piece == nullptr
+					|| targetCase->m_Piece->m_Color != m_Color))
 					accessibleCases.Add(targetCase);
 			}
-			else
-				break;
+			// else: 범위 밖 칸은 건너뜀 (break → continue)
 		}
 	}
 
@@ -57,7 +57,7 @@ TArray<ACaseActor*> AKingPieceActor::GetAccessibleCases()
 				y++;
 			}
 			if (isValidRoque)
-				accessibleCases.Add(m_Board->GetCase(m_X, y + 2));
+				accessibleCases.Add(m_Board->GetCase(m_X, m_Y + 2));
 		}
 	}
 

@@ -29,6 +29,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     private bool   _isOllamaAlive;
     private string _errorText = string.Empty;
 
+    // ── AI VS AI 자동 대전 ───────────────────────────────────────
+    private bool                   _isAutoPlay;
+    private CancellationTokenSource? _autoPlayCts;
+
     // ── INotifyPropertyChanged ───────────────────────────────────
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Notify(string prop) =>
@@ -67,6 +71,36 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public bool AiLevel1 => _aiLevel == 1;
     public bool AiLevel2 => _aiLevel == 2;
     public bool AiLevel3 => _aiLevel == 3;
+
+    public bool IsAutoPlay
+    {
+        get => _isAutoPlay;
+        set
+        {
+            _isAutoPlay = value;
+            Notify(nameof(IsAutoPlay));
+            Notify(nameof(AutoPlayButtonText));
+            Notify(nameof(AutoPlayButtonColor));
+            Notify(nameof(AutoPlayStatusText));
+        }
+    }
+
+    public string AutoPlayButtonText =>
+        _isAutoPlay ? "⏹  Auto Play 중지" : "▶  AI VS AI — Auto Play";
+
+    public System.Windows.Media.Brush AutoPlayButtonColor =>
+        _isAutoPlay
+            ? new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xFF, 0xDD, 0xDD))
+            : new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0xDD, 0xFF, 0xDD));
+
+    private string _autoPlayStatusText = string.Empty;
+    public string AutoPlayStatusText
+    {
+        get => _autoPlayStatusText;
+        set { _autoPlayStatusText = value; Notify(nameof(AutoPlayStatusText)); }
+    }
 
     // ── 생성자 ───────────────────────────────────────────────────
     public MainWindow()
@@ -154,6 +188,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             using var doc  = JsonDocument.Parse(line);
             string    type = doc.RootElement.TryGetProperty("type", out var tp)
                              ? (tp.GetString() ?? "") : "";
+
+            if (type == "game_over")
+            {
+                string winner = doc.RootElement.TryGetProperty("winner", out var w)
+                                ? (w.GetString() ?? "") : "?";
+                Dispatcher.Invoke(() =>
+                    AutoPlayStatusText = $"게임 종료 — 승자: {winner}");
+
+                if (_isAutoPlay)
+                    _ = Task.Run(() => AutoPlayRestartDelayAsync());
+                return;
+            }
 
             if (type != "ai_move_request") return;
 
@@ -289,6 +335,70 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         });
     }
 
+    private void OnToggleAutoPlay(object sender, RoutedEventArgs e)
+    {
+        if (_isAutoPlay)
+        {
+            // 중지
+            _autoPlayCts?.Cancel();
+            _autoPlayCts = null;
+            Dispatcher.Invoke(() =>
+            {
+                IsAutoPlay = false;
+                AutoPlayStatusText = string.Empty;
+            });
+        }
+        else
+        {
+            if (!_isOllamaAlive)
+            {
+                ShowError("Ollama가 실행 중이지 않습니다. AI VS AI를 시작할 수 없습니다.");
+                return;
+            }
+            _autoPlayCts = new CancellationTokenSource();
+            Dispatcher.Invoke(() =>
+            {
+                IsAutoPlay = true;
+                AutoPlayStatusText = "AI VS AI 진행 중...";
+            });
+            SendAiVsAiNewGame();
+        }
+    }
+
+    private void SendAiVsAiNewGame()
+    {
+        _ = SendCommandAsync(new
+        {
+            v = 1, type = "command", cmd = "new_game",
+            options = new { playerColor = "WHITE", mode = "AI_VS_AI", aiLevel = _aiLevel },
+            requestId = NewId()
+        });
+        Dispatcher.Invoke(() => AutoPlayStatusText = "AI VS AI 진행 중...");
+    }
+
+    private async Task AutoPlayRestartDelayAsync()
+    {
+        var cts = _autoPlayCts;
+        if (cts == null) return;
+
+        try
+        {
+            // 7초 대기 후 자동 재시작 (매초 카운트다운 표시)
+            for (int i = 7; i > 0; i--)
+            {
+                if (cts.Token.IsCancellationRequested) return;
+                int remaining = i;
+                Dispatcher.Invoke(() =>
+                    AutoPlayStatusText = $"다음 게임 시작까지 {remaining}초...");
+                await Task.Delay(1000, cts.Token);
+            }
+
+            if (!cts.Token.IsCancellationRequested && _isAutoPlay)
+                Dispatcher.Invoke(SendAiVsAiNewGame);
+        }
+        catch (OperationCanceledException) { }
+    }
+
     private void OnAiLevelChanged(object sender, RoutedEventArgs e)
     {
         if (sender is RadioButton rb && rb.Tag is string tag && int.TryParse(tag, out int level))
@@ -304,6 +414,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     protected override void OnClosed(EventArgs e)
     {
+        _autoPlayCts?.Cancel();
+        _autoPlayCts?.Dispose();
         _stream?.Dispose();
         _client?.Dispose();
         _llm.Dispose();

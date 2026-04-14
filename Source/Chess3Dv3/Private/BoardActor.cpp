@@ -55,6 +55,11 @@ void ABoardActor::BeginPlay()
 
 ACaseActor* ABoardActor::GetCase(int x, int y)
 {
+	if (x < 0 || x > 7 || y < 0 || y > 7)
+	{
+		UE_LOG(LogTemp, Error, TEXT("GetCase: 범위 초과 (%d, %d)"), x, y);
+		return nullptr;
+	}
 	return cases[x * 8 + y];
 }
 
@@ -117,9 +122,15 @@ void ABoardActor::NewGame(TEnumAsByte<PieceColor> playerColor,
 
 void ABoardActor::TriggerAiTurnIfNeeded()
 {
-	if (m_GameMode == VS_AI && !m_bAiThinking
-		&& m_ActivePlayerColor != m_PlayerColor)
+	if (m_bAiThinking) return;
+
+	if (m_GameMode == VS_AI && m_ActivePlayerColor != m_PlayerColor)
 	{
+		RequestAiMove();
+	}
+	else if (m_GameMode == AI_VS_AI)
+	{
+		// AI_VS_AI: 양쪽 모두 AI가 둠
 		RequestAiMove();
 	}
 }
@@ -294,8 +305,9 @@ void ABoardActor::RequestAiMove()
 
 	if (LegalMoves.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Chess AI: 합법 수 없음 — 게임 종료?"));
+		UE_LOG(LogTemp, Warning, TEXT("Chess AI: 합법 수 없음 — 게임 종료"));
 		m_bAiThinking = false;
+		NotifyGameOver();
 		return;
 	}
 
@@ -384,13 +396,33 @@ void ABoardActor::OnAiMoveResponseTcp(bool bOk, const FString& MoveUci,
 	}
 }
 
+// ── 게임 종료 알림 ────────────────────────────────────────────
+
+void ABoardActor::NotifyGameOver()
+{
+	FString Winner = (m_ActivePlayerColor == WHITE) ? TEXT("BLACK") : TEXT("WHITE");
+	FString Msg = FString::Printf(
+		TEXT("{\"v\":1,\"type\":\"game_over\",\"winner\":\"%s\"}"), *Winner);
+
+	UGameInstance* GI = GetGameInstance();
+	UChessCommandSubsystem* Sub = GI
+		? GI->GetSubsystem<UChessCommandSubsystem>() : nullptr;
+	if (Sub)
+		Sub->SendToWpf(Msg);
+
+	UE_LOG(LogTemp, Log, TEXT("Chess: 게임 종료 — winner=%s"), *Winner);
+}
+
 // ── 상태 JSON ────────────────────────────────────────────────
 
 FString ABoardActor::GetStatusJson() const
 {
 	FString State = m_bAiThinking ? TEXT("thinking") : TEXT("running");
 	FString Turn  = (m_ActivePlayerColor == WHITE) ? TEXT("WHITE") : TEXT("BLACK");
-	FString Mode  = (m_GameMode == VS_AI) ? TEXT("VS_AI") : TEXT("HOTSEAT");
+	FString Mode;
+	if      (m_GameMode == VS_AI)    Mode = TEXT("VS_AI");
+	else if (m_GameMode == AI_VS_AI) Mode = TEXT("AI_VS_AI");
+	else                             Mode = TEXT("HOTSEAT");
 	FString Color = (m_PlayerColor == WHITE) ? TEXT("WHITE") : TEXT("BLACK");
 
 	return FString::Printf(

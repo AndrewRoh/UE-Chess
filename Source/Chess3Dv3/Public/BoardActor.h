@@ -20,7 +20,8 @@ UENUM()
 enum EChessGameMode : uint8
 {
 	HOTSEAT,
-	VS_AI
+	VS_AI,
+	AI_VS_AI
 };
 
 UCLASS()
@@ -70,6 +71,9 @@ public:
 	/** TCP 경유로 WPF에서 도착한 AI 수 응답 처리 (게임 스레드에서 호출) */
 	void OnAiMoveResponseTcp(bool bOk, const FString& MoveUci,
 	                         const FString& CommentKo, const FString& ErrorMsg);
+
+	/** 합법 수 없음 — 게임 종료 알림을 WPF로 전송 */
+	void NotifyGameOver();
 
 	// ── 상태 JSON (WPF 피드백용) ───────────────────────────────
 	FString GetStatusJson() const;
