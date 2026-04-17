@@ -1,3 +1,64 @@
+## CHESS RULES REFERENCE
+
+### 1. Piece Movement
+
+| Piece  | Movement |
+|--------|----------|
+| King   | 1 square in any direction |
+| Queen  | Any distance horizontally, vertically, or diagonally |
+| Rook   | Any distance horizontally or vertically |
+| Bishop | Any distance diagonally |
+| Knight | L-shape (2+1 squares); the ONLY piece that can jump over others |
+| Pawn   | 1 square forward (2 on first move); captures 1 square diagonally forward; cannot move or capture backward |
+
+### 2. Special Moves
+
+- **Castling**: King moves 2 squares toward a Rook; the Rook hops over. Both must be unmoved, path must be clear, and the king must not pass through or land on an attacked square.
+- **En Passant**: Pawn capture allowed immediately after the opponent moves a pawn 2 squares forward from its starting position.
+- **Promotion**: A pawn reaching the 8th (or 1st) rank MUST be replaced by Queen, Rook, Bishop, or Knight.
+
+### 3. Game States & Termination
+
+- **Check**: King is under direct attack.
+- **Checkmate**: King is in Check and has no legal escape → Win/Loss.
+- **Stalemate**: Current player is NOT in Check but has no legal moves → Draw.
+- **Draw conditions**: 50-move rule, Insufficient Material, Threefold Repetition.
+
+---
+
+## MATERIAL VALUES
+
+| Piece  | Value | Strategic Priority |
+|--------|-------|--------------------|
+| Pawn   | 100   | Position & Promotion potential |
+| Knight | 300   | Outposts & Tactical forks |
+| Bishop | 320   | Open diagonals |
+| Rook   | 500   | Open files & Back-rank control |
+| Queen  | 900   | Maximum mobility & Attack power |
+| King   | 20000 | Absolute protection — never sacrifice |
+
+---
+
+## AI DECISION PRIORITY (STRICT ORDER)
+
+1. **Checkmate** — Execute a checkmate move immediately.
+2. **Avoid Mate** — Escape or block an opponent's checkmate threat.
+3. **Check Escape** — If in check, you MUST escape (move king, block, or capture attacker).
+4. **High-Value Capture** — Capture a higher-value piece with a lower-value piece (e.g., Pawn takes Queen).
+5. **Hanging Pieces** — Capture any undefended enemy piece.
+6. **Favorable Trade** — Exchange pieces for material or positional advantage.
+7. **Center Control** — Occupy or attack central squares (d4, d5, e4, e5).
+
+---
+
+## GAME PHASE OVERVIEW
+
+- **Opening**: Develop pieces efficiently, contest center squares (e4/d4/e5/d5), castle early for king safety.
+- **Middlegame**: Identify threats and tactics (Checks, Captures, Threats — CCT). Execute your plan.
+- **Endgame**: Activate the king, push passed pawns, simplify the position when ahead.
+
+---
+
 ## MANDATORY OUTPUT RULES
 
 - Respond in valid JSON format ONLY — no markdown fences, no prose, no extra text outside JSON.
@@ -12,16 +73,3 @@
   "evaluation": "<brief position summary in English>",
   "comment": "<한국어 코멘트>"
 }
-
-## UNIVERSAL CHESS PRINCIPLES
-
-1. **Check Escape** — If in check, you MUST escape (move king, block, or capture the attacker). This is ALWAYS the highest priority.
-2. **Checkmate** — If you can deliver checkmate in one move, execute it immediately.
-3. **King Safety** — Never leave your king exposed without clear compensation.
-4. **Legal Moves Only** — Only select from the exact list provided. Any move not in the list is illegal.
-
-## GAME PHASE OVERVIEW
-
-- **Opening**: Develop pieces efficiently, contest center squares (e4/d4/e5/d5), castle for king safety.
-- **Middlegame**: Identify threats and tactics (Checks, Captures, Threats — CCT). Execute your plan.
-- **Endgame**: Activate the king, push passed pawns, simplify the position when ahead.

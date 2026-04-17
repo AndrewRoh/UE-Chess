@@ -36,6 +36,9 @@ public sealed class UEAiMoveRequest
     /// (선택) 흑의 수만 모아둔 기록. 제공되면 MoveHistory 파싱 대신 이 값을 사용.
     /// </summary>
     public string[]? BlackHistory { get; init; }
+
+    /// <summary>현재 수를 둘 측의 킹이 체크 상태인지 (UE 엔진이 알려줌).</summary>
+    public bool InCheck { get; init; }
 }
 
 /// <summary>

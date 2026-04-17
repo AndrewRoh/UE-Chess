@@ -64,9 +64,15 @@ public:
 
 	// ── AI 지원 ────────────────────────────────────────────────
 	FString GenerateFEN() const;
-	TArray<FString> GetLegalMovesUCI() const;
+	TArray<FString> GetLegalMovesUCI();
 	bool ExecuteMoveUCI(const FString& Uci);
 	void TriggerAiTurnIfNeeded();
+
+	/** 지정한 색의 킹이 현재 체크 상태인지 */
+	bool IsColorInCheck(TEnumAsByte<PieceColor> Color);
+
+	/** from→to 수가 자신의 킹을 체크 상태로 두는지 (의사-합법 수 필터링용) */
+	bool WouldLeaveKingInCheck(int fromX, int fromY, int toX, int toY);
 
 	/** TCP 경유로 WPF에서 도착한 AI 수 응답 처리 (게임 스레드에서 호출) */
 	void OnAiMoveResponseTcp(bool bOk, const FString& MoveUci,

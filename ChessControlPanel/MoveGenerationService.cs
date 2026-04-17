@@ -57,8 +57,8 @@ public sealed class MoveGenerationService
         // ── 6. 프롬프트 변수 치환 ────────────────────────────
         string legalMovesStr = string.Join(", ", req.LegalMoves);
         string materialBalance = FenAnalyzer.CalculateMaterialBalance(req.Fen);
-        string checkWarning    = FenAnalyzer.IsKingInCheck(req.Fen, req.LegalMoves)
-            ? "\n[경고] 현재 체크 상태입니다 — 체크 회피가 최우선입니다."
+        string checkWarning    = req.InCheck
+            ? "\n[경고] 현재 체크 상태입니다 — 반드시 체크를 회피하세요. 합법 수 목록은 이미 체크를 회피하는 수로만 구성되어 있습니다."
             : "";
 
         string userPrompt = moveTemplate

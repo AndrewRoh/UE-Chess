@@ -99,12 +99,19 @@ void APieceActor::ClickedLog(AActor* Target, FKey ButtonPressed)
 bool APieceActor::isValidMove(ACaseActor* targetCase)
 {
 	int targetX = targetCase->m_X, targetY = targetCase->m_Y;
+
+	bool bPseudoLegal = false;
 	for (auto cs : GetAccessibleCases())
 	{
-		if (cs->m_X == targetX && cs->m_Y == targetY)
-			return true;
+		if (cs->m_X == targetX && cs->m_Y == targetY) { bPseudoLegal = true; break; }
 	}
-	return false;
+	if (!bPseudoLegal) return false;
+
+	// 자신의 킹을 체크 상태로 두는 수는 불법
+	if (m_Board && m_Board->WouldLeaveKingInCheck(m_X, m_Y, targetX, targetY))
+		return false;
+
+	return true;
 }
 
 void APieceActor::Move(ACaseActor* targetCase)

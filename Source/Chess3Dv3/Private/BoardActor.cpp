@@ -68,15 +68,25 @@ void ABoardActor::EndTurn()
 	m_selectedPiece = nullptr;
 	m_ActivePlayerColor = (m_ActivePlayerColor == WHITE) ? BLACK : WHITE;
 
-	// 직전 수에서 킹이 포획됐는지 확인 (포획된 색이 패배)
-	if (!IsKingAlive(WHITE))
+	// 안전망: 킹이 포획되는 비정상 종료 (정상 경로에서는 도달하지 않아야 함)
+	if (!IsKingAlive(WHITE)) { NotifyGameOver(TEXT("BLACK")); return; }
+	if (!IsKingAlive(BLACK)) { NotifyGameOver(TEXT("WHITE")); return; }
+
+	// 새 차례의 합법 수로 체크메이트/스테일메이트 판정
+	TArray<FString> NextLegal = GetLegalMovesUCI();
+	if (NextLegal.IsEmpty())
 	{
-		NotifyGameOver(TEXT("BLACK"));
-		return;
-	}
-	if (!IsKingAlive(BLACK))
-	{
-		NotifyGameOver(TEXT("WHITE"));
+		if (IsColorInCheck(m_ActivePlayerColor))
+		{
+			FString Winner = (m_ActivePlayerColor == WHITE) ? TEXT("BLACK") : TEXT("WHITE");
+			UE_LOG(LogTemp, Log, TEXT("Chess: 체크메이트 — winner=%s"), *Winner);
+			NotifyGameOver(Winner);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("Chess: 스테일메이트 — 무승부"));
+			NotifyGameOver(TEXT("DRAW"));
+		}
 		return;
 	}
 
@@ -237,8 +247,10 @@ FString ABoardActor::GenerateFEN() const
 }
 
 // ── UCI 합법 수 목록 ─────────────────────────────────────────
+// 의사-합법 수(각 기물의 이동 규칙만 따른 수)를 생성한 뒤,
+// 자신의 킹을 체크 상태로 만드는 수를 제외해 실제 합법 수만 반환.
 
-TArray<FString> ABoardActor::GetLegalMovesUCI() const
+TArray<FString> ABoardActor::GetLegalMovesUCI()
 {
 	TArray<FString> Moves;
 	for (ACaseActor* cs : cases)
@@ -250,6 +262,9 @@ TArray<FString> ABoardActor::GetLegalMovesUCI() const
 		TArray<ACaseActor*> Targets = cs->m_Piece->GetAccessibleCases();
 		for (ACaseActor* t : Targets)
 		{
+			if (WouldLeaveKingInCheck(fromX, fromY, t->m_X, t->m_Y))
+				continue;
+
 			FString Uci = FString::Printf(TEXT("%c%d%c%d"),
 				TEXT('a') + fromY, 8 - fromX,
 				TEXT('a') + t->m_Y, 8 - t->m_X);
@@ -257,6 +272,73 @@ TArray<FString> ABoardActor::GetLegalMovesUCI() const
 		}
 	}
 	return Moves;
+}
+
+// ── 체크 판정 & 수 시뮬레이션 ───────────────────────────────
+
+bool ABoardActor::IsColorInCheck(TEnumAsByte<PieceColor> Color)
+{
+	// 1. 해당 색의 킹 위치 찾기
+	int kingX = -1, kingY = -1;
+	for (ACaseActor* cs : cases)
+	{
+		if (!IsValid(cs) || !IsValid(cs->m_Piece)) continue;
+		if (cs->m_Piece->m_Color == Color && Cast<AKingPieceActor>(cs->m_Piece))
+		{
+			kingX = cs->m_X;
+			kingY = cs->m_Y;
+			break;
+		}
+	}
+	if (kingX < 0) return false;
+
+	// 2. 상대 기물 중 킹 칸을 공격하는 것이 있는지 확인
+	for (ACaseActor* cs : cases)
+	{
+		if (!IsValid(cs) || !IsValid(cs->m_Piece)) continue;
+		if (cs->m_Piece->m_Color == Color) continue;
+
+		for (ACaseActor* t : cs->m_Piece->GetAccessibleCases())
+		{
+			if (IsValid(t) && t->m_X == kingX && t->m_Y == kingY)
+				return true;
+		}
+	}
+	return false;
+}
+
+bool ABoardActor::WouldLeaveKingInCheck(int fromX, int fromY, int toX, int toY)
+{
+	if (fromX < 0 || fromX > 7 || fromY < 0 || fromY > 7 ||
+		toX   < 0 || toX   > 7 || toY   < 0 || toY   > 7)
+		return true;
+
+	ACaseActor* fromCase = cases[fromX * 8 + fromY];
+	ACaseActor* toCase   = cases[toX   * 8 + toY];
+	if (!IsValid(fromCase) || !IsValid(toCase) || !IsValid(fromCase->m_Piece))
+		return true;
+
+	APieceActor* movingPiece   = fromCase->m_Piece;
+	APieceActor* capturedPiece = toCase->m_Piece;
+	int savedX = movingPiece->m_X;
+	int savedY = movingPiece->m_Y;
+	TEnumAsByte<PieceColor> color = movingPiece->m_Color;
+
+	// 파괴 없이 참조만 스와핑해 수를 적용
+	fromCase->m_Piece = nullptr;
+	toCase->m_Piece   = movingPiece;
+	movingPiece->m_X  = toX;
+	movingPiece->m_Y  = toY;
+
+	bool bInCheck = IsColorInCheck(color);
+
+	// 원상 복귀
+	fromCase->m_Piece = movingPiece;
+	toCase->m_Piece   = capturedPiece;
+	movingPiece->m_X  = savedX;
+	movingPiece->m_Y  = savedY;
+
+	return bInCheck;
 }
 
 // ── UCI 수 실행 ─────────────────────────────────────────────
@@ -343,6 +425,7 @@ void ABoardActor::RequestAiMove()
 
 	ReqJson->SetNumberField(TEXT("ai_level"),      m_AiLevel);
 	ReqJson->SetNumberField(TEXT("time_limit_ms"), 3000.0);
+	ReqJson->SetBoolField  (TEXT("in_check"),      IsColorInCheck(m_ActivePlayerColor));
 
 	// WPF가 ReadLineAsync()로 수신하므로 반드시 한 줄(개행 없는) 압축 JSON이어야 함
 	FString Body;

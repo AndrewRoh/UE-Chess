@@ -288,6 +288,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 ? (side.StartsWith("b") ? _aiLevelBlack : _aiLevelWhite)
                 : (doc.RootElement.TryGetProperty("ai_level", out var al) ? al.GetInt32() : _aiLevel);
 
+            bool inCheck = doc.RootElement.TryGetProperty("in_check", out var ic)
+                           && ic.ValueKind == JsonValueKind.True;
+
             var req = new UEAiMoveRequest
             {
                 Fen         = GetStr(doc.RootElement, "fen"),
@@ -297,6 +300,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 SideToMove  = side,
                 TimeLimitMs = doc.RootElement.TryGetProperty("time_limit_ms", out var tl)
                               ? tl.GetInt32() : 3000,
+                InCheck     = inCheck,
             };
 
             AiMoveResponse result = await _moveService.SelectMoveAsync(req);
