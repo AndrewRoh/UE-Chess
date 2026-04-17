@@ -148,16 +148,28 @@ public sealed class MoveGenerationService
     {
         if (_promptCache.TryGetValue(level, out var cached)) return cached;
 
-        string sysPath  = Path.Combine(_promptDir, profile.SystemPromptFile);
+        // 공통 베이스 프롬프트 로드
+        string basePath   = Path.Combine(_promptDir, "chess_system_base.txt");
+        string basePrompt = File.Exists(basePath)
+            ? File.ReadAllText(basePath, System.Text.Encoding.UTF8)
+            : string.Empty;
+
+        // 레벨별 시스템 프롬프트 로드 (없으면 기본 파일로 폴백)
+        string sysPath = Path.Combine(_promptDir, profile.SystemPromptFile);
+        if (!File.Exists(sysPath)) sysPath = Path.Combine(_promptDir, "chess_system.txt");
+        string levelPrompt = File.ReadAllText(sysPath, System.Text.Encoding.UTF8);
+
+        // 베이스 + 레벨별 합성 (베이스가 있으면 앞에 붙임)
+        string systemPrompt = string.IsNullOrWhiteSpace(basePrompt)
+            ? levelPrompt
+            : basePrompt + "\n\n---\n\n" + levelPrompt;
+
+        // 수 생성 템플릿 로드 (없으면 기본 파일로 폴백)
         string tmplPath = Path.Combine(_promptDir, profile.MoveTemplateFile);
-
-        // 레벨별 파일이 없으면 기본 파일로 폴백 (하위 호환)
-        if (!File.Exists(sysPath))  sysPath  = Path.Combine(_promptDir, "chess_system.txt");
         if (!File.Exists(tmplPath)) tmplPath = Path.Combine(_promptDir, "move_generation.txt");
+        string template = File.ReadAllText(tmplPath, System.Text.Encoding.UTF8);
 
-        var entry = (
-            File.ReadAllText(sysPath,  System.Text.Encoding.UTF8),
-            File.ReadAllText(tmplPath, System.Text.Encoding.UTF8));
+        var entry = (systemPrompt, template);
         _promptCache[level] = entry;
         return entry;
     }

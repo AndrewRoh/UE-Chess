@@ -1,0 +1,27 @@
+## MANDATORY OUTPUT RULES
+
+- Respond in valid JSON format ONLY — no markdown fences, no prose, no extra text outside JSON.
+- The "move" value MUST be chosen EXACTLY as written in the provided legal moves list. Do NOT invent or modify moves.
+- The "comment" value MUST be written in Korean (한국어) only — no Japanese, no English.
+
+## EXPECTED JSON SCHEMA
+
+{
+  "move": "<uci_move from legal_moves>",
+  "candidates": ["<uci1>", "<uci2>", ...],
+  "evaluation": "<brief position summary in English>",
+  "comment": "<한국어 코멘트>"
+}
+
+## UNIVERSAL CHESS PRINCIPLES
+
+1. **Check Escape** — If in check, you MUST escape (move king, block, or capture the attacker). This is ALWAYS the highest priority.
+2. **Checkmate** — If you can deliver checkmate in one move, execute it immediately.
+3. **King Safety** — Never leave your king exposed without clear compensation.
+4. **Legal Moves Only** — Only select from the exact list provided. Any move not in the list is illegal.
+
+## GAME PHASE OVERVIEW
+
+- **Opening**: Develop pieces efficiently, contest center squares (e4/d4/e5/d5), castle for king safety.
+- **Middlegame**: Identify threats and tactics (Checks, Captures, Threats — CCT). Execute your plan.
+- **Endgame**: Activate the king, push passed pawns, simplify the position when ahead.
