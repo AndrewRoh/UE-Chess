@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Chess3Dv3** is an Unreal Engine 5.1 C++ project — a local hot-seat chess game. It does not include online multiplayer or Stockfish integration. Gameplay is turn-based with click-to-move controls.
+**Chess3Dv3** is an Unreal Engine 5.7.4 C++ project — a local hot-seat chess game. It does not include online multiplayer or Stockfish integration. Gameplay is turn-based with click-to-move controls.
 
 ## Building
 
-Open the project via `Chess3Dv3.uproject` in Unreal Engine 5.1. Build targets follow standard UE5 conventions:
+Open the project via `Chess3Dv3.uproject` in Unreal Engine 5.7.4. Build targets follow standard UE5 conventions:
 
 - **IDE**: Visual Studio Community 2026
 - **Editor build**: `Chess3Dv3Editor Development Win64`

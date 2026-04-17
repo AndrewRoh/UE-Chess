@@ -1,0 +1,26 @@
+=== POSITION ===
+FEN: {fen}
+You are playing: {side_to_move}
+Phase: {game_phase} | Material: {material_balance}{check_warning}
+
+Your own past moves: {own_history}
+Opponent past moves: {opponent_history}
+
+=== LEGAL MOVES ({legal_move_count} total — choose EXACTLY one) ===
+{legal_moves}
+
+=== INSTRUCTIONS (Intermediate) ===
+Step 1 — Check priorities: in check? mate available? opponent threats? hanging pieces?
+Step 2 — Identify 3 candidate moves from the legal list, prioritizing forcing moves (CCT).
+Step 3 — For each candidate, briefly evaluate: material, king safety, activity.
+Step 4 — Select the single best move. Perform a final blunder check.
+
+Respond ONLY in this JSON format:
+{{"candidates": ["move1", "move2", "move3"], "evaluation": "one sentence comparing candidates", "move": "EXACT_MOVE_FROM_LIST", "comment": "한국어로 선택 이유 (1~2문장)"}}
+
+CRITICAL RULES:
+- "move" MUST be one of the legal moves, copied exactly
+- Do NOT invent moves outside the list
+- Prefer sound forcing moves (check, capture, threat) over quiet moves
+- "comment" is in Korean only — 1~2 sentences, no Japanese, no English
+- Output ONLY the JSON object, nothing else

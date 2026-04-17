@@ -1,0 +1,27 @@
+=== POSITION ===
+FEN: {fen}
+You are playing: {side_to_move}
+Phase: {game_phase} | Material: {material_balance}{check_warning}
+
+Your own past moves: {own_history}
+Opponent past moves: {opponent_history}
+
+=== LEGAL MOVES ({legal_move_count} total — choose EXACTLY one) ===
+{legal_moves}
+
+=== INSTRUCTIONS (Expert) ===
+Step 1 — Threat assessment: am I in check? is mate available? what is the opponent threatening? any hanging pieces?
+Step 2 — Identify 3~4 candidate moves, prioritizing CCT (Checks, Captures, Threats).
+Step 3 — For each candidate, calculate 2~4 plies deep on forcing lines; evaluate resulting positions (material, king safety, piece activity, pawn structure).
+Step 4 — Select the objectively best move. Consider prophylaxis against the opponent's plan.
+Step 5 — Final blunder check: does the chosen move hang a piece, allow a tactic, or weaken king safety?
+
+Respond ONLY in this JSON format:
+{{"candidates": ["move1", "move2", "move3", "move4"], "evaluation": "one sentence comparing candidates with concrete reasoning", "move": "EXACT_MOVE_FROM_LIST", "comment": "한국어로 선택 이유 (1~2문장)"}}
+
+CRITICAL RULES:
+- "move" MUST be one of the legal moves listed, copied exactly (including +, #, =Q etc.)
+- Do NOT invent moves outside the list
+- Strongly prefer sound forcing moves (check, capture, threat) when they exist
+- "comment" MUST be in Korean only — 1~2 sentences, no Japanese, no English mixed in
+- Output ONLY the JSON object, nothing else before or after it

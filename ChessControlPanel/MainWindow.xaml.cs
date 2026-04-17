@@ -21,7 +21,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ── UE 연결 ──────────────────────────────────────────────────
     private TcpClient?     _client;
     private NetworkStream? _stream;
-    private int            _aiLevel = 2;
+    private int            _aiLevel      = 2;  // VS AI 단일 레벨
+    private int            _aiLevelWhite = 2;  // AI VS AI 백 레벨
+    private int            _aiLevelBlack = 2;  // AI VS AI 흑 레벨
     private readonly SemaphoreSlim _sendLock = new(1, 1);
 
     // ── 상태 ────────────────────────────────────────────────────
@@ -32,6 +34,14 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     // ── AI VS AI 자동 대전 ───────────────────────────────────────
     private bool                   _isAutoPlay;
     private CancellationTokenSource? _autoPlayCts;
+
+    // ── 마지막 AI 수 정보 ────────────────────────────────────────
+    private bool   _hasLastMove;
+    private string _lastMoveUci     = string.Empty;
+    private string _lastLevelText   = string.Empty;
+    private string _lastLatencyText = string.Empty;
+    private bool   _lastIsFallback;
+    private string _lastComment     = string.Empty;
 
     // ── INotifyPropertyChanged ───────────────────────────────────
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -68,9 +78,18 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public Visibility ErrorVisibility =>
         string.IsNullOrEmpty(_errorText) ? Visibility.Collapsed : Visibility.Visible;
 
+    // VS AI 레벨 바인딩
     public bool AiLevel1 => _aiLevel == 1;
     public bool AiLevel2 => _aiLevel == 2;
     public bool AiLevel3 => _aiLevel == 3;
+
+    // AI VS AI 백/흑 레벨 바인딩
+    public bool AutoWhiteLevel1 => _aiLevelWhite == 1;
+    public bool AutoWhiteLevel2 => _aiLevelWhite == 2;
+    public bool AutoWhiteLevel3 => _aiLevelWhite == 3;
+    public bool AutoBlackLevel1 => _aiLevelBlack == 1;
+    public bool AutoBlackLevel2 => _aiLevelBlack == 2;
+    public bool AutoBlackLevel3 => _aiLevelBlack == 3;
 
     public bool IsAutoPlay
     {
@@ -101,6 +120,52 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         get => _autoPlayStatusText;
         set { _autoPlayStatusText = value; Notify(nameof(AutoPlayStatusText)); }
     }
+
+    // ── 마지막 AI 수 속성 ────────────────────────────────────────
+    public bool HasLastMove
+    {
+        get => _hasLastMove;
+        set { _hasLastMove = value; Notify(nameof(HasLastMove)); Notify(nameof(LastMoveVisibility)); }
+    }
+    public string LastMoveUci
+    {
+        get => _lastMoveUci;
+        set { _lastMoveUci = value; Notify(nameof(LastMoveUci)); }
+    }
+    public string LastLevelText
+    {
+        get => _lastLevelText;
+        set { _lastLevelText = value; Notify(nameof(LastLevelText)); }
+    }
+    public string LastLatencyText
+    {
+        get => _lastLatencyText;
+        set { _lastLatencyText = value; Notify(nameof(LastLatencyText)); }
+    }
+    public bool LastIsFallback
+    {
+        get => _lastIsFallback;
+        set { _lastIsFallback = value; Notify(nameof(LastIsFallback)); Notify(nameof(LastFallbackText)); Notify(nameof(LastFallbackColor)); }
+    }
+    public string LastComment
+    {
+        get => _lastComment;
+        set { _lastComment = value; Notify(nameof(LastComment)); Notify(nameof(LastCommentVisibility)); }
+    }
+
+    public Visibility LastMoveVisibility =>
+        _hasLastMove ? Visibility.Visible : Visibility.Collapsed;
+
+    public string LastFallbackText =>
+        _lastIsFallback ? "예 (LLM 실패)" : "아니요";
+
+    public System.Windows.Media.Brush LastFallbackColor =>
+        _lastIsFallback
+            ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Red)
+            : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x22, 0x88, 0x22));
+
+    public Visibility LastCommentVisibility =>
+        string.IsNullOrEmpty(_lastComment) ? Visibility.Collapsed : Visibility.Visible;
 
     // ── 생성자 ───────────────────────────────────────────────────
     public MainWindow()
@@ -209,18 +274,44 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             if (legalMoves.Length == 0) return;
 
+            // 차례(side) 결정: 메시지 명시 > FEN 파싱
+            string side = GetStr(doc.RootElement, "side_to_move");
+            if (string.IsNullOrEmpty(side))
+            {
+                string fen = GetStr(doc.RootElement, "fen");
+                var fenParts = fen.Split(' ');
+                side = fenParts.Length >= 2 ? fenParts[1] : "w";
+            }
+
+            // AI VS AI 모드면 흑/백 각 레벨, VS AI 모드면 단일 레벨
+            int resolvedLevel = _isAutoPlay
+                ? (side.StartsWith("b") ? _aiLevelBlack : _aiLevelWhite)
+                : (doc.RootElement.TryGetProperty("ai_level", out var al) ? al.GetInt32() : _aiLevel);
+
             var req = new UEAiMoveRequest
             {
                 Fen         = GetStr(doc.RootElement, "fen"),
                 LegalMoves  = legalMoves,
                 MoveHistory = moveHistory,
-                AiLevel     = doc.RootElement.TryGetProperty("ai_level", out var al)
-                              ? al.GetInt32() : 2,
+                Level       = resolvedLevel,
+                SideToMove  = side,
                 TimeLimitMs = doc.RootElement.TryGetProperty("time_limit_ms", out var tl)
                               ? tl.GetInt32() : 3000,
             };
 
             AiMoveResponse result = await _moveService.SelectMoveAsync(req);
+
+            // 마지막 AI 수 디버그 패널 업데이트
+            string levelName = result.LevelUsed switch { 1 => "초보", 2 => "중급", 3 => "고급", _ => "?" };
+            Dispatcher.Invoke(() =>
+            {
+                HasLastMove     = true;
+                LastMoveUci     = result.MoveUci ?? "-";
+                LastLevelText   = $"{levelName} (Lv.{result.LevelUsed ?? _aiLevel})";
+                LastLatencyText = result.LatencyMs.HasValue ? $"{result.LatencyMs} ms" : "-";
+                LastIsFallback  = result.IsFallback;
+                LastComment     = result.CommentKo ?? string.Empty;
+            });
 
             // 응답을 동일한 TCP 연결로 전송 (sendLock으로 직렬화됨)
             await SendCommandAsync(new
@@ -339,14 +430,11 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     {
         if (_isAutoPlay)
         {
-            // 중지
+            // 중지 — CTS 취소로 게임 종료 후 자동 재시작만 막음 (현재 게임은 자연 종료)
             _autoPlayCts?.Cancel();
             _autoPlayCts = null;
-            Dispatcher.Invoke(() =>
-            {
-                IsAutoPlay = false;
-                AutoPlayStatusText = string.Empty;
-            });
+            IsAutoPlay = false;
+            AutoPlayStatusText = string.Empty;
         }
         else
         {
@@ -393,7 +481,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
                 await Task.Delay(1000, cts.Token);
             }
 
-            if (!cts.Token.IsCancellationRequested && _isAutoPlay)
+            if (!cts.Token.IsCancellationRequested && _isAutoPlay && _autoPlayCts == cts)
                 Dispatcher.Invoke(SendAiVsAiNewGame);
         }
         catch (OperationCanceledException) { }
@@ -407,6 +495,28 @@ public partial class MainWindow : Window, INotifyPropertyChanged
             Notify(nameof(AiLevel1));
             Notify(nameof(AiLevel2));
             Notify(nameof(AiLevel3));
+        }
+    }
+
+    private void OnAutoAiWhiteLevelChanged(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton rb && rb.Tag is string tag && int.TryParse(tag, out int level))
+        {
+            _aiLevelWhite = level;
+            Notify(nameof(AutoWhiteLevel1));
+            Notify(nameof(AutoWhiteLevel2));
+            Notify(nameof(AutoWhiteLevel3));
+        }
+    }
+
+    private void OnAutoAiBlackLevelChanged(object sender, RoutedEventArgs e)
+    {
+        if (sender is RadioButton rb && rb.Tag is string tag && int.TryParse(tag, out int level))
+        {
+            _aiLevelBlack = level;
+            Notify(nameof(AutoBlackLevel1));
+            Notify(nameof(AutoBlackLevel2));
+            Notify(nameof(AutoBlackLevel3));
         }
     }
 

@@ -1,0 +1,23 @@
+=== POSITION ===
+FEN: {fen}
+You are playing: {side_to_move}
+Phase: {game_phase} | Material: {material_balance}{check_warning}
+
+Your own past moves: {own_history}
+Opponent past moves: {opponent_history}
+
+=== LEGAL MOVES ({legal_move_count} total — choose EXACTLY one) ===
+{legal_moves}
+
+=== INSTRUCTIONS (Beginner) ===
+Step 1 — Quickly check: Am I in check? Can I checkmate? Is any opponent piece hanging?
+Step 2 — Pick 2 reasonable candidate moves from the legal list.
+Step 3 — Choose one. It does not need to be the best — just a sensible beginner move.
+
+Respond ONLY in this JSON format:
+{{"candidates": ["move1", "move2"], "evaluation": "short comparison (one phrase)", "move": "EXACT_MOVE_FROM_LIST", "comment": "한국어로 선택 이유 (1문장, 짧게)"}}
+
+CRITICAL:
+- "move" MUST be copied exactly from the legal moves list
+- "comment" is in Korean only, 1 short sentence
+- Output ONLY the JSON, nothing else

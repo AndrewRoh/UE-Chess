@@ -72,8 +72,11 @@ public:
 	void OnAiMoveResponseTcp(bool bOk, const FString& MoveUci,
 	                         const FString& CommentKo, const FString& ErrorMsg);
 
-	/** 합법 수 없음 — 게임 종료 알림을 WPF로 전송 */
-	void NotifyGameOver();
+	/** 게임 종료 알림을 WPF로 전송 */
+	void NotifyGameOver(const FString& Winner);
+
+	/** 보드에서 해당 색 킹이 살아있는지 확인 */
+	bool IsKingAlive(TEnumAsByte<PieceColor> Color) const;
 
 	// ── 상태 JSON (WPF 피드백용) ───────────────────────────────
 	FString GetStatusJson() const;

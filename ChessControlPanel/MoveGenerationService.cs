@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 
@@ -5,21 +6,20 @@ namespace ChessControlPanel;
 
 /// <summary>
 /// FEN + 합법 수(UCI) 목록을 받아 LLM으로 최선의 수 1개를 선택.
-/// chess-api의 generate_ai_move / build_move_prompt 기능 이관.
+/// 레벨별 프롬프트/파라미터 차별화, 흑/백 독립 히스토리, 체크 경고, 재료 균형 계산 지원.
 /// </summary>
 public sealed class MoveGenerationService
 {
     private readonly LlmClient _llm;
-    private readonly string    _systemPrompt;
-    private readonly string    _moveTemplate;
+    private readonly string    _promptDir;
 
-    public MoveGenerationService(LlmClient llm)
+    // 레벨별 프롬프트 캐시 — 파일 I/O를 최초 1회로 제한.
+    private readonly Dictionary<AiLevel, (string system, string template)> _promptCache = new();
+
+    public MoveGenerationService(LlmClient llm, string? promptDir = null)
     {
         _llm = llm;
-
-        string promptDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Prompts");
-        _systemPrompt = File.ReadAllText(Path.Combine(promptDir, "chess_system.txt"), System.Text.Encoding.UTF8);
-        _moveTemplate = File.ReadAllText(Path.Combine(promptDir, "move_generation.txt"), System.Text.Encoding.UTF8);
+        _promptDir = promptDir ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Prompts");
     }
 
     /// <summary>
@@ -30,33 +30,55 @@ public sealed class MoveGenerationService
         if (req.LegalMoves.Length == 0)
             return Error("합법 수 목록이 비어 있습니다");
 
-        int moveCount = req.MoveHistory?.Length ?? 0;
-        (string phase, double temp) = moveCount switch
+        // ── 1. 레벨 결정 ─────────────────────────────────────
+        var level = (AiLevel)(req.Level ?? (int)AiLevel.Intermediate);
+        if (!Enum.IsDefined(typeof(AiLevel), level)) level = AiLevel.Intermediate;
+
+        // ── 2. 현재 차례 확정 (명시값 > FEN 파싱 > history 길이 추정) ─
+        string side = ResolveSideToMove(req);
+
+        // ── 3. 흑/백 독립 히스토리 분리 ──────────────────────
+        var history = SideHistory.FromRequest(req);
+        var (ownHist, oppHist) = history.FormatForSide(side);
+
+        // ── 4. 국면(Opening/Middlegame/Endgame) 판정 ─────────
+        int totalMoves = history.TotalMoves;
+        string phase = totalMoves switch
         {
-            < 10 => ("Opening",    0.4),
-            < 30 => ("Middlegame", 0.3),
-            _    => ("Endgame",    0.2),
+            < 10 => "Opening",
+            < 30 => "Middlegame",
+            _    => "Endgame",
         };
 
-        string legalMovesStr = string.Join(", ", req.LegalMoves);
-        string historyStr    = moveCount > 0
-            ? string.Join(", ", req.MoveHistory!)
-            : "(none)";
+        // ── 5. 레벨별 프로필 로드 ────────────────────────────
+        var profile = LevelProfile.For(level, phase);
+        var (systemPrompt, moveTemplate) = LoadPrompts(level, profile);
 
-        // Python str.format 이스케이프({{ → {)를 처리한 후 변수 치환
-        string userPrompt = _moveTemplate
-            .Replace("{fen}",             req.Fen)
-            .Replace("{move_history}",    historyStr)
-            .Replace("{legal_moves}",     legalMovesStr)
-            .Replace("{game_phase}",      phase)
-            .Replace("{material_balance}", "unknown")
-            .Replace("{check_warning}",   "")
+        // ── 6. 프롬프트 변수 치환 ────────────────────────────
+        string legalMovesStr = string.Join(", ", req.LegalMoves);
+        string materialBalance = FenAnalyzer.CalculateMaterialBalance(req.Fen);
+        string checkWarning    = FenAnalyzer.IsKingInCheck(req.Fen, req.LegalMoves)
+            ? "\n[경고] 현재 체크 상태입니다 — 체크 회피가 최우선입니다."
+            : "";
+
+        string userPrompt = moveTemplate
+            .Replace("{fen}",              req.Fen)
+            .Replace("{side_to_move}",     side == "w" ? "White" : "Black")
+            .Replace("{own_history}",      ownHist)
+            .Replace("{opponent_history}", oppHist)
+            .Replace("{move_history}",     FormatFullHistory(history))  // 하위 호환
+            .Replace("{legal_moves}",      legalMovesStr)
+            .Replace("{legal_move_count}", req.LegalMoves.Length.ToString())
+            .Replace("{game_phase}",       phase)
+            .Replace("{material_balance}", materialBalance)
+            .Replace("{check_warning}",    checkWarning)
             .Replace("{{", "{")
             .Replace("}}", "}");
 
-        // 3회 재시도 전체에 대한 단일 타임아웃 (100초).
-        // 시도별로 90초를 따로 두면 최대 270초가 되어 UE5 HTTP 타임아웃(120초)을 초과할 수 있음.
+        // ── 7. 3회 재시도 루프 (전체 100초 타임아웃) ─────────
         using var globalCts = new CancellationTokenSource(TimeSpan.FromSeconds(100));
+        var stopwatch = Stopwatch.StartNew();
+        string? lastError = null;
 
         for (int attempt = 1; attempt <= 3; attempt++)
         {
@@ -64,13 +86,16 @@ public sealed class MoveGenerationService
 
             try
             {
-                string raw = await _llm.GenerateAsync(_systemPrompt, userPrompt, temp, globalCts.Token);
+                string raw = await _llm.GenerateAsync(systemPrompt, userPrompt, profile, globalCts.Token);
 
                 using var doc  = JsonDocument.Parse(raw);
-                string    move = doc.RootElement.GetProperty("move").GetString() ?? "";
+                string    move = doc.RootElement.TryGetProperty("move", out var mv)
+                               ? (mv.GetString() ?? "")
+                               : "";
 
                 if (Array.IndexOf(req.LegalMoves, move) >= 0)
                 {
+                    stopwatch.Stop();
                     return new AiMoveResponse
                     {
                         Ok         = true,
@@ -78,34 +103,102 @@ public sealed class MoveGenerationService
                         Candidates = GetStringArray(doc.RootElement, "candidates"),
                         Evaluation = GetString(doc.RootElement,      "evaluation"),
                         CommentKo  = GetString(doc.RootElement,      "comment"),
-                        Error      = null,
+                        LevelUsed  = (int)level,
+                        LatencyMs  = stopwatch.ElapsedMilliseconds,
+                        IsFallback = false,
                     };
                 }
 
-                // 목록에 없는 수 반환됨 → 재시도
+                lastError = $"Attempt {attempt}: 목록에 없는 수 반환됨 ('{move}')";
             }
             catch (OperationCanceledException)
             {
-                break; // 전체 타임아웃(100초) 초과
+                lastError = "전체 타임아웃(100초) 초과";
+                break;
             }
-            catch (Exception)
+            catch (JsonException ex)
             {
+                lastError = $"Attempt {attempt}: JSON 파싱 실패 — {ex.Message}";
+                if (attempt == 3) break;
+            }
+            catch (Exception ex)
+            {
+                lastError = $"Attempt {attempt}: {ex.GetType().Name} — {ex.Message}";
                 if (attempt == 3 || globalCts.Token.IsCancellationRequested) break;
             }
         }
 
-        // 폴백: 합법 수 중 랜덤
+        // ── 8. 폴백: 합법 수 중 랜덤 ────────────────────────
+        stopwatch.Stop();
         string fallback = req.LegalMoves[Random.Shared.Next(req.LegalMoves.Length)];
         return new AiMoveResponse
         {
-            Ok        = true,
-            MoveUci   = fallback,
-            CommentKo = "자동 선택된 수입니다.",
-            Error     = "LLM 호출 실패 — 랜덤 수 선택",
+            Ok         = true,
+            MoveUci    = fallback,
+            CommentKo  = "자동 선택된 수입니다.",
+            Error      = $"LLM 호출 실패 — 랜덤 수 선택 ({lastError})",
+            LevelUsed  = (int)level,
+            LatencyMs  = stopwatch.ElapsedMilliseconds,
+            IsFallback = true,
         };
     }
 
-    // ── 헬퍼 ────────────────────────────────────────────────────
+    // ── 프롬프트 로딩 (캐시) ──────────────────────────────────
+    private (string system, string template) LoadPrompts(AiLevel level, LevelProfile profile)
+    {
+        if (_promptCache.TryGetValue(level, out var cached)) return cached;
+
+        string sysPath  = Path.Combine(_promptDir, profile.SystemPromptFile);
+        string tmplPath = Path.Combine(_promptDir, profile.MoveTemplateFile);
+
+        // 레벨별 파일이 없으면 기본 파일로 폴백 (하위 호환)
+        if (!File.Exists(sysPath))  sysPath  = Path.Combine(_promptDir, "chess_system.txt");
+        if (!File.Exists(tmplPath)) tmplPath = Path.Combine(_promptDir, "move_generation.txt");
+
+        var entry = (
+            File.ReadAllText(sysPath,  System.Text.Encoding.UTF8),
+            File.ReadAllText(tmplPath, System.Text.Encoding.UTF8));
+        _promptCache[level] = entry;
+        return entry;
+    }
+
+    // ── 차례 결정 ─────────────────────────────────────────────
+    private static string ResolveSideToMove(UEAiMoveRequest req)
+    {
+        // 1. 명시 제공
+        if (!string.IsNullOrEmpty(req.SideToMove))
+            return req.SideToMove.StartsWith("b") ? "b" : "w";
+
+        // 2. FEN 파싱 (예: "... w KQkq - 0 1")
+        if (!string.IsNullOrEmpty(req.Fen))
+        {
+            var parts = req.Fen.Split(' ');
+            if (parts.Length >= 2 && (parts[1] == "w" || parts[1] == "b"))
+                return parts[1];
+        }
+
+        // 3. 전체 history 길이로 추정 (짝수면 백 차례)
+        int total = (req.WhiteHistory?.Length ?? 0) + (req.BlackHistory?.Length ?? 0);
+        if (total == 0) total = req.MoveHistory?.Length ?? 0;
+        return (total & 1) == 0 ? "w" : "b";
+    }
+
+    // ── 하위 호환용 전체 히스토리 포맷 ────────────────────────
+    private static string FormatFullHistory(SideHistory h)
+    {
+        if (h.TotalMoves == 0) return "(none)";
+
+        var merged = new List<string>(h.TotalMoves);
+        int max = Math.Max(h.White.Count, h.Black.Count);
+        for (int i = 0; i < max; i++)
+        {
+            if (i < h.White.Count) merged.Add(h.White[i]);
+            if (i < h.Black.Count) merged.Add(h.Black[i]);
+        }
+        return string.Join(", ", merged);
+    }
+
+    // ── 헬퍼 ──────────────────────────────────────────────────
     private static AiMoveResponse Error(string msg) =>
         new() { Ok = false, Error = msg };
 
@@ -115,9 +208,10 @@ public sealed class MoveGenerationService
     private static string[] GetStringArray(JsonElement el, string key)
     {
         if (!el.TryGetProperty(key, out var arr) || arr.ValueKind != JsonValueKind.Array)
-            return [];
+            return Array.Empty<string>();
         return arr.EnumerateArray()
                   .Select(x => x.GetString() ?? "")
+                  .Where(s => !string.IsNullOrEmpty(s))
                   .ToArray();
     }
 }

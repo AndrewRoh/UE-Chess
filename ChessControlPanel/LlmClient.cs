@@ -6,7 +6,7 @@ namespace ChessControlPanel;
 
 /// <summary>
 /// Ollama API를 통한 LLM 호출 클라이언트.
-/// chess-api의 llm_client.py 기능을 C#으로 이관.
+/// 레벨별 샘플링 파라미터 지원 추가.
 /// </summary>
 public sealed class LlmClient : IDisposable
 {
@@ -19,18 +19,23 @@ public sealed class LlmClient : IDisposable
 
     public LlmClient(
         string ollamaHost = "http://172.20.64.76:11434",
-        string model      = "gemma4:31b")
+        string model      = "gemma4:latest",
+        HttpClient? httpClient = null)
     {
-        _ollamaHost = ollamaHost;
+        _ollamaHost = ollamaHost.TrimEnd('/');
         _model      = model;
-        _http       = new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
+        // DI/테스트 편의를 위해 외부 주입 허용. 미주입 시 내부 생성.
+        _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(90) };
     }
 
-    /// <summary>Ollama /api/generate 호출 — 비스트리밍, JSON 응답 문자열 반환</summary>
+    /// <summary>
+    /// Ollama /api/generate 호출 — 비스트리밍, JSON 응답 문자열 반환.
+    /// </summary>
+    /// <param name="profile">레벨별 샘플링 프로필 (temperature 등)</param>
     public async Task<string> GenerateAsync(
-        string systemPrompt,
-        string userPrompt,
-        double temperature = 0.3,
+        string       systemPrompt,
+        string       userPrompt,
+        LevelProfile profile,
         CancellationToken ct = default)
     {
         var payload = new
@@ -39,13 +44,13 @@ public sealed class LlmClient : IDisposable
             system     = systemPrompt,
             prompt     = userPrompt,
             stream     = false,
-            keep_alive = "30m",   // 모델을 GPU 메모리에 30분 유지 → 재로딩 지연 제거
+            keep_alive = "30m",   // GPU 메모리에 30분 유지
             options = new
             {
-                temperature,
-                num_predict    = 150,  // 체스 수 JSON은 최대 100토큰이면 충분 (500→150)
-                top_p          = 0.9,
-                repeat_penalty = 1.1,
+                temperature    = profile.Temperature,
+                num_predict    = profile.NumPredict,
+                top_p          = profile.TopP,
+                repeat_penalty = profile.RepeatPenalty,
                 num_gpu        = 99,
             },
             format = "json",
@@ -53,7 +58,8 @@ public sealed class LlmClient : IDisposable
 
         string body = JsonSerializer.Serialize(payload);
         using var content = new StringContent(body, Encoding.UTF8, "application/json");
-        var response = await _http.PostAsync($"{_ollamaHost}/api/generate", content, ct);
+
+        using var response = await _http.PostAsync($"{_ollamaHost}/api/generate", content, ct);
         response.EnsureSuccessStatusCode();
 
         string responseBody = await response.Content.ReadAsStringAsync(ct);
@@ -61,13 +67,33 @@ public sealed class LlmClient : IDisposable
         return doc.RootElement.GetProperty("response").GetString() ?? "";
     }
 
-    /// <summary>Ollama 서버가 살아있는지 확인 (/api/tags 엔드포인트로 체크)</summary>
+    /// <summary>
+    /// (하위 호환) 기존 코드에서 temperature만 넘기던 경우 지원.
+    /// 신규 코드에서는 <see cref="GenerateAsync(string, string, LevelProfile, CancellationToken)"/> 사용.
+    /// </summary>
+    public Task<string> GenerateAsync(
+        string systemPrompt,
+        string userPrompt,
+        double temperature = 0.3,
+        CancellationToken ct = default)
+    {
+        var legacy = new LevelProfile(
+            Temperature:    temperature,
+            NumPredict:     150,
+            TopP:           0.9,
+            RepeatPenalty:  1.1,
+            SystemPromptFile: "",
+            MoveTemplateFile: "");
+        return GenerateAsync(systemPrompt, userPrompt, legacy, ct);
+    }
+
+    /// <summary>Ollama 서버가 살아있는지 확인 (/api/tags)</summary>
     public async Task<bool> IsAliveAsync()
     {
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            var resp = await _http.GetAsync($"{_ollamaHost}/api/tags", cts.Token);
+            using var resp = await _http.GetAsync($"{_ollamaHost}/api/tags", cts.Token);
             return resp.IsSuccessStatusCode;
         }
         catch { return false; }

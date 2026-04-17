@@ -67,6 +67,19 @@ void ABoardActor::EndTurn()
 {
 	m_selectedPiece = nullptr;
 	m_ActivePlayerColor = (m_ActivePlayerColor == WHITE) ? BLACK : WHITE;
+
+	// 직전 수에서 킹이 포획됐는지 확인 (포획된 색이 패배)
+	if (!IsKingAlive(WHITE))
+	{
+		NotifyGameOver(TEXT("BLACK"));
+		return;
+	}
+	if (!IsKingAlive(BLACK))
+	{
+		NotifyGameOver(TEXT("WHITE"));
+		return;
+	}
+
 	TriggerAiTurnIfNeeded();
 }
 
@@ -307,7 +320,8 @@ void ABoardActor::RequestAiMove()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Chess AI: 합법 수 없음 — 게임 종료"));
 		m_bAiThinking = false;
-		NotifyGameOver();
+		FString Winner = (m_ActivePlayerColor == WHITE) ? TEXT("BLACK") : TEXT("WHITE");
+		NotifyGameOver(Winner);
 		return;
 	}
 
@@ -398,9 +412,19 @@ void ABoardActor::OnAiMoveResponseTcp(bool bOk, const FString& MoveUci,
 
 // ── 게임 종료 알림 ────────────────────────────────────────────
 
-void ABoardActor::NotifyGameOver()
+bool ABoardActor::IsKingAlive(TEnumAsByte<PieceColor> Color) const
 {
-	FString Winner = (m_ActivePlayerColor == WHITE) ? TEXT("BLACK") : TEXT("WHITE");
+	for (ACaseActor* cs : cases)
+	{
+		if (!IsValid(cs) || !IsValid(cs->m_Piece)) continue;
+		if (cs->m_Piece->m_Color == Color && Cast<AKingPieceActor>(cs->m_Piece))
+			return true;
+	}
+	return false;
+}
+
+void ABoardActor::NotifyGameOver(const FString& Winner)
+{
 	FString Msg = FString::Printf(
 		TEXT("{\"v\":1,\"type\":\"game_over\",\"winner\":\"%s\"}"), *Winner);
 
