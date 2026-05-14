@@ -1,6 +1,6 @@
 # UE-Chess
 
-로컬 2인용 3D 체스 게임. Unreal Engine 5.1 C++로 제작되었으며, WPF 컨트롤 패널과 Ollama LLM을 연동한 AI 대전 기능을 포함합니다.
+로컬 2인용 3D 체스 게임. Unreal Engine 5.7 C++로 제작되었으며, WPF 컨트롤 패널과 Ollama LLM을 연동한 AI 대전 기능을 포함합니다.
 
 ![Gameplay](/Assets/gameplay.gif)
 
